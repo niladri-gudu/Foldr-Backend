@@ -8,14 +8,16 @@ const router = express.Router();
 
 // Get all files for the logged in user
 router.get("/", async (req, res) => {
+
+    console.log("Fetching all files for user...");
     try {
-        const { userId } = req.auth;
+        const { userId } = req.user;
 
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
 
-        const user = await userModel.findOne({ clerkId: userId });
+        const user = await userModel.findById({ _id: userId });
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
@@ -37,22 +39,21 @@ router.get("/", async (req, res) => {
 
 // Get a single file for the logged in user
 router.get("/:id", async (req, res) => {
-    const fileId = req.params.id;
-
+    
     try {
-        const { userId } = req.auth;
+        const { userId } = req.user;
+        const fileId = req.params.id;
 
-        console.log(userId, "userId")
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
 
-        const user = await userModel.findOne({ clerkId: userId });
+        const user = await userModel.findById({ _id: userId });
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
 
-        const file = await fileModel.findOne({ _id: fileId });
+        const file = await fileModel.findOne({ _id: fileId }).populate('userId', 'name email');
         if (!file) {
             return res.status(404).json({ error: "File not found" });
         }
@@ -61,7 +62,7 @@ router.get("/:id", async (req, res) => {
         if (!isOwner) {
             const sharedFile = await sharedFileModel.findOne({
                 fileId: file._id,
-                sharedWithIds: user.clerkId
+                sharedWithIds: user._id
             })
             if (!sharedFile) {
                 return res.status(403).json({ error: "Forbidden: You do not have permission to access this file" });
@@ -70,16 +71,18 @@ router.get("/:id", async (req, res) => {
 
         const signedUrl = await generateSignedUrl(file.key);
 
-        res.status(200).json({ file: {
-            _id: file._id,
-            name: file.name,
-            email: file.email,
-            type: file.type,
-            size: file.size,
-            userId: file.userId,
-            userName: file.userName,
-            url: signedUrl,
-        }})
+        console.log("File fetched successfully:", file);
+
+        res.status(200).json({ 
+            file: {
+                _id: file._id,
+                name: file.name,
+                type: file.type,
+                size: file.size,
+                user: file.userId,
+                url: signedUrl,
+            }
+        });
 
     } catch (error) {
         console.error("Failed to fetch file:", error);

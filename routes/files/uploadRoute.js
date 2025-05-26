@@ -1,6 +1,5 @@
 import express from "express";
 import upload from '../../utils/s3.js';
-import { clerkClient } from "@clerk/express";
 import userModel from "../../models/userModel.js";
 import fileModel from "../../models/fileModel.js";
 
@@ -9,16 +8,17 @@ const router = express.Router();
 // Upload a file to S3 for the logged in user
 router.post('/', upload.single('file'), async (req, res) => {
     try {
-        const { userId } = req.auth
+        const { userId } = req.user
+
         if (!userId) {
             return res.status(401).json({ error: "Unauthorized: missing userId" });
         }
 
-        const user = await userModel.findOne({ clerkId: userId });
+        const user = await userModel.findById({ _id: userId });
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
-        
+
         const file = req.file;
 
         const newFile = await fileModel.create({
