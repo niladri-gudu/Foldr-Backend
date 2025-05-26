@@ -1,9 +1,9 @@
 import mongoose from 'mongoose';
 
 const UserSchema = new mongoose.Schema({
-  clerkId: { type: String, required: true, unique: true },
-  email: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
   name: { type: String, require: true },
+  password: { type: String, require: true },
   files: [{ type: mongoose.Schema.Types.ObjectId, ref: 'File' }],
   deleted: [{ type: mongoose.Schema.Types.ObjectId, ref: 'File' }],
   received: [{ type: mongoose.Schema.Types.ObjectId, ref: 'File' }],

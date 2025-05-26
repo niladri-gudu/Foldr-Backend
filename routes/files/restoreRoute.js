@@ -6,20 +6,21 @@ const router = express.Router();
 
 // Restore a file from trash
 router.post('/:id', async (req, res) => {
-    const fileId = req.params.id;
-
+    
     try {
-        const { userId } = req.auth
+        const { userId } = req.user
+        const fileId = req.params.id;
+
         if (!userId) {
             return res.status(401).json({ error: "Unauthorized: missing userId" });
         }
 
-        const user = await userModel.findOne({ clerkId: userId });
+        const user = await userModel.findById({ _id: userId });
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
 
-        const file = await fileModel.findOne({ _id: fileId });
+        const file = await fileModel.findById({ _id: fileId });
         if (!file) {
             return res.status(404).json({ error: "File not found" });
         }

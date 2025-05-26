@@ -1,45 +1,33 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import connectDB from './db/connect.js';
-import { requireAuth, clerkMiddleware } from '@clerk/express';
 import authRouter from './routes/auth/index.js';
 import fileRouter from './routes/files/index.js';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
+import auth from './middlewares/auth.js';
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use(morgan('dev'));
 app.use(cors({
   origin: process.env.FRONTEND_URL,
   credentials: true,
 }));
-app.use(morgan('dev'));
-
-app.use(clerkMiddleware())
-
-const apiAuth = (req, res, next) => {
-  if (!req.auth || !req.auth.userId) {
-    return res.status(401).json({ 
-      message: "Unauthorized",
-      error: "Authentication required" 
-    });
-  }
-  next();
-};
 
 app.get('/', (req, res) => {
   res.send("hellooooo")
 })
 
-app.use('/auth', requireAuth(), authRouter)
-app.use('/file', apiAuth, fileRouter)
+app.use('/auth', authRouter)
+app.use('/file', auth, fileRouter)
 
 const startServer = async () => {
   try {

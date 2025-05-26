@@ -4,7 +4,6 @@ const FileSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   name: { type: String, required: true },
   size: { type: Number, required: true },
-  email: { type: String, required: true },
   starred: { type: Boolean, default: false },
   isDeleted: { type: Boolean, default: false },
   key: { type: String, required: true },

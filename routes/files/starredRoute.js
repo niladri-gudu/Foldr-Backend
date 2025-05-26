@@ -7,12 +7,12 @@ const router = express.Router();
 // Get all starred files for the logged in user
 router.get('/', async (req, res) => {
     try {
-        const { userId } = req.auth
+        const { userId } = req.user
         if (!userId) {
             return res.status(401).json({ error: "Unauthorized: missing userId" });
         }
 
-        const user = await userModel.findOne({ clerkId: userId });
+        const user = await userModel.findById({ _id: userId });
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
@@ -35,15 +35,16 @@ router.get('/', async (req, res) => {
 
 // Star or unstar a file
 router.post('/:id', async (req, res) => {
-    const fileId = req.params.id;
-
+    
     try {
-        const { userId } = req.auth
+        const { userId } = req.user
+        const fileId = req.params.id;
+
         if (!userId) {
             return res.status(401).json({ error: "Unauthorized: missing userId" });
         }
 
-        const user = await userModel.findOne({ clerkId: userId });
+        const user = await userModel.findById({ _id: userId });
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }

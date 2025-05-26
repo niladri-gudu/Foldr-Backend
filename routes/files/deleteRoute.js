@@ -8,20 +8,21 @@ const router = express.Router();
 
 // Permanently delete a file
 router.delete("/:id", async (req, res) => {
-    const fileId = req.params.id;
-
+    
     try {
-        const { userId } = req.auth;
+        const fileId = req.params.id;
+        const { userId } = req.user;
+
         if (!userId) {
             return res.status(401).json({ error: "Unauthorized: missing userId" });
         }
 
-        const user = await userModel.findOne({ clerkId: userId });
+        const user = await userModel.findById({ _id: userId });
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
 
-        const file = await fileModel.findOne({ _id: fileId });
+        const file = await fileModel.findById({ _id: fileId });
         if (!file) {
             return res.status(404).json({ error: "File not found" });
         }
@@ -36,6 +37,7 @@ router.delete("/:id", async (req, res) => {
         })
 
         await s3.send(command)
+
         user.deleted.pull(fileId)
         await user.save()
 

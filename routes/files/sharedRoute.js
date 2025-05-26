@@ -7,10 +7,9 @@ const router = express.Router();
 
 // Validating a user to share a file with
 router.post('/validate', async (req, res) => {
-    const { email } = req.body;
-
     try {
-        if (!req.auth || !req.auth.userId) {
+        const { email } = req.body;
+        if (!req.user || !req.user.userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
 
@@ -19,16 +18,17 @@ router.post('/validate', async (req, res) => {
             return res.status(404).json({ message: "User not found" });
         }
 
-        const sender = await userModel.findOne({ clerkId: req.auth.userId });
+
+        const sender = await userModel.findById({ _id: req.user.userId });
         if (!sender) {
             return res.status(404).json({ message: "User not found" });
         }
 
-        if (sender.clerkId === recipient.clerkId) {
+        if (sender._id === recipient._id) {
             return res.status(400).json({ message: "You cannot share a file with yourself" });
         }
 
-        res.status(200).json({ message: "User found", user: { email: recipient.email, clerkId: recipient.clerkId, name: recipient.name } });
+        res.status(200).json({ message: "User found", user: { email: recipient.email, _id: recipient._id, name: recipient.name } });
 
     } catch (error) {
         console.error("error in validating user", error);
@@ -39,18 +39,18 @@ router.post('/validate', async (req, res) => {
 // Get all shared files for the logged in user
 router.get('/', async (req, res) => {
     try {
-        const { userId } = req.auth;
+        const { userId } = req.user;
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
 
-        const user = await userModel.findOne({ clerkId: userId });
+        const user = await userModel.findOne({ _id: userId });
         if (!user) {
             return res.status(404).json({ message: "User not found" });
         }
 
         const sharedWithMe = await sharedFileModel.find({
-            sharedWithIds: user.clerkId
+            sharedWithIds: userId
         })
         .populate('fileId')
         .populate('sharedBy', 'name email')
@@ -69,11 +69,11 @@ router.post('/:id', async (req, res) => {
     const { email } = req.body
 
     try {
-        if (!req.auth || !req.auth.userId) {
+        if (!req.user || !req.user.userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
 
-        const sender = await userModel.findOne({ clerkId: req.auth.userId });
+        const sender = await userModel.findById({ _id: req.user.userId });
         if (!sender) {
             return res.status(404).json({ message: "Sender not found" });
         }
@@ -95,19 +95,19 @@ router.post('/:id', async (req, res) => {
                 fileId: file._id,
                 sharedBy: sender._id,
                 sharedWithEmails: [recipient.email],
-                sharedWithIds: [recipient.clerkId],
+                sharedWithIds: [recipient._id],
             })
         } else {
             if (!sharedFile.sharedWithEmails.includes(recipient.email)) {
                 sharedFile.sharedWithEmails.push(recipient.email);
             }
-            if (!sharedFile.sharedWithIds.includes(recipient.clerkId)) {
-                sharedFile.sharedWithIds.push(recipient.clerkId);
+            if (!sharedFile.sharedWithIds.some(id => id.equals(recipient._id))) {
+                sharedFile.sharedWithIds.push(recipient._id);
             }
             await sharedFile.save();
         }
         
-        if (!recipient.received.includes(file._id)) {
+        if (!recipient.received.some(id => id.equals(file._id))) {
             recipient.received.push(file._id);
             await recipient.save();
         }
