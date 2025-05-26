@@ -18,8 +18,10 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(morgan('dev'));
 app.use(cors({
-  origin: process.env.FRONTEND_URL,
+  origin: [`${process.env.FRONTEND_URL}`, 'http://localhost:3000'], // Add your production frontend URL
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.get('/', (req, res) => {

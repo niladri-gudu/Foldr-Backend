@@ -8,8 +8,6 @@ const router = express.Router();
 
 // Get all files for the logged in user
 router.get("/", async (req, res) => {
-
-    console.log("Fetching all files for user...");
     try {
         const { userId } = req.user;
 
@@ -70,8 +68,6 @@ router.get("/:id", async (req, res) => {
         }
 
         const signedUrl = await generateSignedUrl(file.key);
-
-        console.log("File fetched successfully:", file);
 
         res.status(200).json({ 
             file: {
