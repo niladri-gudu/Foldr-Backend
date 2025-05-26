@@ -28,6 +28,8 @@ router.post('/', async (req, res) => {
                 process.env.JWT_SECRET,
             );
 
+            console.log(process.env.NODE_ENV === "production");
+
             res.cookie("token", token, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === "production",
