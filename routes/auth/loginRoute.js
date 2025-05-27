@@ -28,14 +28,12 @@ router.post('/', async (req, res) => {
                 process.env.JWT_SECRET,
             );
 
-            console.log(process.env.NODE_ENV === "production");
-
             res.cookie("token", token, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === "production",
                 sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-                maxAge: 3600000,
-                path: '/',   
+                maxAge: 24 * 60 * 60 * 1000,
+                path: '/'
             })
             
             res.status(200).json({ message: "Login successful" });
