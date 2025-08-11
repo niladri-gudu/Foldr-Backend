@@ -67,7 +67,7 @@ router.get("/:id", async (req, res) => {
             }
         }
 
-        const signedUrl = await generateSignedUrl(file.key);
+        const signedUrl = await generateSignedUrl(file.key, file.name, true);
 
         res.status(200).json({ 
             file: {

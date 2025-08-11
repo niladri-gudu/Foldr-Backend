@@ -24,7 +24,7 @@ router.post('/validate', async (req, res) => {
             return res.status(404).json({ message: "User not found" });
         }
 
-        if (sender._id === recipient._id) {
+        if (sender._id.equals(recipient._id)) {
             return res.status(400).json({ message: "You cannot share a file with yourself" });
         }
 
@@ -101,15 +101,14 @@ router.post('/:id', async (req, res) => {
             if (!sharedFile.sharedWithEmails.includes(recipient.email)) {
                 sharedFile.sharedWithEmails.push(recipient.email);
             }
-            if (!sharedFile.sharedWithIds.some(id => id.equals(recipient._id))) {
+            if (!sharedFile.sharedWithIds.some(id => id.toString() === recipient._id.toString())) {
                 sharedFile.sharedWithIds.push(recipient._id);
             }
             await sharedFile.save();
         }
         
-        if (!recipient.received.some(id => id.equals(file._id))) {
-            recipient.received.push(file._id);
-            await recipient.save();
+        if (!sharedFile.sharedWithIds.some(id => id.toString() === recipient._id.toString())) {
+            sharedFile.sharedWithIds.push(recipient._id);
         }
 
         res.status(200).json({ message: "File shared successfully", sharedFile });
@@ -119,5 +118,45 @@ router.post('/:id', async (req, res) => {
         return res.status(500).json({ message: "Internal server error" });
     }
 })
+
+// Remove a file from the user's shared list
+router.delete('/:fileId', async (req, res) => {
+    try {
+        if (!req.user || !req.user.userId) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        const { fileId } = req.params;
+        const userId = req.user.userId;
+
+        const sharedFile = await sharedFileModel.findOne({ fileId });
+        if (!sharedFile) {
+            return res.status(404).json({ message: "Shared file record not found" });
+        }
+
+        sharedFile.sharedWithIds = sharedFile.sharedWithIds.filter(
+            id => id.toString() !== userId.toString()
+        );
+        sharedFile.sharedWithEmails = sharedFile.sharedWithEmails.filter(
+            email => email !== req.user.email
+        );
+
+        await sharedFile.save();
+
+        const user = await userModel.findById(userId);
+        if (user) {
+            user.received = user.received.filter(
+                id => id.toString() !== fileId.toString()
+            );
+            await user.save();
+        }
+
+        res.status(200).json({ message: "File removed from shared list successfully" });
+    } catch (error) {
+        console.error("Error removing shared file:", error);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+});
+
 
 export default router;

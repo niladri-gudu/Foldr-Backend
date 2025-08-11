@@ -7,16 +7,33 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
 import auth from './middlewares/auth.js';
+import path from 'path';
+import fs from 'fs';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const tempDir = path.join(process.cwd(), 'temp');
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir, { recursive: true });
+  console.log('✅ Created temp directory');
+}
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(morgan('dev'));
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.use((req, res, next) => {
+  req.setTimeout(60000);
+  res.setTimeout(60000);
+  next();
+});
 
 app.use(cors({
   origin: process.env.FRONTEND_URL,
@@ -27,7 +44,7 @@ app.use(cors({
 }));
 
 app.get('/', (req, res) => {
-  res.send("hellooooo")
+  res.send("Server is running!!!")
 })
 
 app.use('/auth', authRouter)
