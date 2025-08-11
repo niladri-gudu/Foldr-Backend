@@ -15,12 +15,6 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-const tempDir = path.join(process.cwd(), 'temp');
-if (!fs.existsSync(tempDir)) {
-  fs.mkdirSync(tempDir, { recursive: true });
-  console.log('✅ Created temp directory');
-}
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
