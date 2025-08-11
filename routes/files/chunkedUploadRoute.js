@@ -1,201 +1,326 @@
-import express from "express";
-import multer from 'multer';
-import AWS from 'aws-sdk';
-import userModel from "../../models/userModel.js";
-import fileModel from "../../models/fileModel.js";
-import { redis } from "../../lib/redis.js";
+/* eslint-disable @typescript-eslint/no-unused-vars */
+import { useCallback, useState, useRef } from 'react';
+import { toast } from 'sonner';
 
-const router = express.Router();
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
 
-console.log('✅ Chunked upload route loaded');
+interface UseFileOperationsProps {
+  onSuccess?: () => void;
+}
 
-// Configure AWS S3
-const s3 = new AWS.S3({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION,
-  signatureVersion: "v4",
-});
+interface ChunkedUploadState {
+  uploadId: string | null;
+  currentChunk: number;
+  totalChunks: number;
+  progress: number;
+  isPaused: boolean;
+  isUploading: boolean;
+}
 
-// 1. Initiate multipart upload
-router.post('/initiate-upload', async (req, res) => {
-  try {
-    const { userId } = req.user;
-    const { fileName, fileSize, totalChunks, contentType } = req.body;
+export const useFileOperations = ({ onSuccess }: UseFileOperationsProps = {}) => {
+  const [chunkedUploadState, setChunkedUploadState] = useState<ChunkedUploadState>({
+    uploadId: null,
+    currentChunk: 0,
+    totalChunks: 0,
+    progress: 0,
+    isPaused: false,
+    isUploading: false,
+  });
 
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+  const uploadStateRef = useRef(chunkedUploadState);
+  uploadStateRef.current = chunkedUploadState;
+
+  const refreshFiles = useCallback(() => {
+    if (onSuccess) onSuccess();
+    window.dispatchEvent(new CustomEvent('filesChanged'));
+  }, [onSuccess]);
+
+  // ===== File actions =====
+  const starFile = useCallback(async (fileId: string, isStarred: boolean) => {
+    try {
+      const res = await fetch(`/api/file/starred/${fileId}`, { method: 'POST', credentials: 'include' });
+      if (res.ok) {
+        toast.success(isStarred ? 'Removed from favorites' : 'Marked as favorite');
+        refreshFiles();
+        return true;
+      }
+      toast.error('Failed to update favorite status');
+      return false;
+    } catch {
+      toast.error('An error occurred while updating favorite status');
+      return false;
     }
+  }, [refreshFiles]);
 
-    const key = `${userId}/${Date.now()}-${fileName}`;
-    const params = {
-      Bucket: process.env.AWS_BUCKET_NAME,
-      Key: key,
-      ContentType: req.body.contentType || 'application/octet-stream'
-    };
+  const trashFile = useCallback(async (fileId: string) => {
+    try {
+      const res = await fetch(`/api/file/trash/${fileId}`, { method: 'POST', credentials: 'include' });
+      if (res.ok) {
+        toast.success('File moved to trash');
+        refreshFiles();
+        return true;
+      }
+      toast.error('Failed to move file to trash');
+      return false;
+    } catch {
+      toast.error('An error occurred while moving file to trash');
+      return false;
+    }
+  }, [refreshFiles]);
 
-    const multipartUpload = await s3.createMultipartUpload(params).promise();
+  const deleteFile = useCallback(async (fileId: string) => {
+    try {
+      const res = await fetch(`/api/file/delete/${fileId}`, { method: 'DELETE', credentials: 'include' });
+      if (res.ok) {
+        toast.success('File deleted permanently');
+        refreshFiles();
+        return true;
+      }
+      toast.error('Failed to delete file');
+      return false;
+    } catch {
+      toast.error('An error occurred while deleting the file');
+      return false;
+    }
+  }, [refreshFiles]);
 
-    await redis.set(
-      `upload:${multipartUpload.UploadId}`,
-      JSON.stringify({
-        userId,
-        fileName,
-        fileSize,
+  const restoreFile = useCallback(async (fileId: string) => {
+    try {
+      const res = await fetch(`/api/file/restore/${fileId}`, { method: 'POST', credentials: 'include' });
+      if (res.ok) {
+        toast.success('File restored from trash');
+        refreshFiles();
+        return true;
+      }
+      toast.error('Failed to restore file');
+      return false;
+    } catch {
+      toast.error('An error occurred while restoring the file');
+      return false;
+    }
+  }, [refreshFiles]);
+
+  const shareFile = useCallback(async (fileId: string, email: string) => {
+    try {
+      const res = await fetch(`/api/file/shared/${fileId}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success('File shared successfully');
+        refreshFiles();
+        return { success: true };
+      }
+      toast.error(data.message || 'Failed to share file');
+      return { success: false, error: data.message };
+    } catch {
+      toast.error('An error occurred while sharing the file');
+      return { success: false, error: 'Network error' };
+    }
+  }, [refreshFiles]);
+
+  const removeSharedFile = useCallback(async (fileId: string) => {
+    try {
+      const res = await fetch(`/api/file/shared/${fileId}`, { method: 'DELETE', credentials: 'include' });
+      if (res.ok) {
+        toast.success('File removed from shared');
+        refreshFiles();
+        return true;
+      }
+      toast.error('Failed to remove file from shared');
+      return false;
+    } catch {
+      toast.error('An error occurred while removing file from shared');
+      return false;
+    }
+  }, [refreshFiles]);
+
+  // ===== Simple upload (backward compatibility) =====
+  const uploadFile = useCallback(async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch(`/api/file/upload`, { method: 'POST', body: formData, credentials: 'include' });
+      if (res.ok) {
+        toast.success('Upload successful');
+        refreshFiles();
+        return true;
+      }
+      toast.error('Upload failed');
+      return false;
+    } catch {
+      toast.error('Upload failed');
+      return false;
+    }
+  }, [refreshFiles]);
+
+  // ===== Chunked upload helpers =====
+  const initiateChunkedUpload = useCallback(async (fileName: string, fileSize: number, totalChunks: number, contentType: string) => {
+    const res = await fetch('/api/file/initiate-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName, fileSize, totalChunks, contentType }),
+      credentials: 'include'
+    });
+    if (!res.ok) throw new Error('Failed to initiate upload');
+    return await res.json(); // { uploadId, key }
+  }, []);
+
+  const getUploadUrl = useCallback(async (uploadId: string, chunkIndex: number) => {
+    const res = await fetch('/api/file/get-upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uploadId, chunkIndex }),
+      credentials: 'include'
+    });
+    if (!res.ok) throw new Error('Failed to get upload URL');
+    return await res.json(); // { url, partNumber }
+  }, []);
+
+  const uploadChunkToS3 = useCallback(async (chunk: Blob, uploadUrl: string) => {
+    const res = await fetch(uploadUrl, { method: 'PUT', body: chunk });
+    if (!res.ok) throw new Error('Failed to upload chunk to S3');
+    const etag = res.headers.get('ETag')?.replace(/"/g, '') || '';
+    return etag;
+  }, []);
+
+  const markChunkUploaded = useCallback(async (uploadId: string, chunkIndex: number, etag: string) => {
+    const res = await fetch('/api/file/mark-chunk-uploaded', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uploadId, chunkIndex, etag }),
+      credentials: 'include'
+    });
+    if (!res.ok) throw new Error('Failed to mark chunk uploaded');
+  }, []);
+
+  const completeChunkedUpload = useCallback(async (uploadId: string, fileName: string) => {
+    const res = await fetch('/api/file/complete-upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uploadId, fileName }),
+      credentials: 'include'
+    });
+    if (!res.ok) throw new Error('Failed to complete upload');
+    const data = await res.json();
+    toast.success('File uploaded successfully');
+    refreshFiles();
+    return data;
+  }, [refreshFiles]);
+
+  const cancelChunkedUpload = useCallback(async (uploadId: string) => {
+    if (!uploadId) return;
+    try {
+      await fetch('/api/file/cancel-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uploadId }),
+        credentials: 'include'
+      });
+    } catch (error) {
+      console.error('Failed to cancel upload:', error);
+    }
+  }, []);
+
+  // ===== Main chunked upload =====
+  const uploadFileChunked = useCallback(async (file: File) => {
+    try {
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+      setChunkedUploadState({
+        uploadId: null,
+        isUploading: true,
         totalChunks,
-        key,
-        parts: [],
-        uploadedChunks: []
-      }),
-      'EX',
-      60 * 60
-    );
+        currentChunk: 0,
+        progress: 0,
+        isPaused: false
+      });
 
-    res.json({ uploadId: multipartUpload.UploadId, key });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to initiate upload: ' + error.message });
-  }
-});
+      const { uploadId } = await initiateChunkedUpload(file.name, file.size, totalChunks, file.type);
+      setChunkedUploadState(prev => ({ ...prev, uploadId }));
 
-// 2. Get presigned URL for a chunk
-router.post("/get-upload-url", async (req, res) => {
-  try {
-    const { uploadId, chunkIndex } = req.body;
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        while (uploadStateRef.current.isPaused) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        if (!uploadStateRef.current.isUploading) break;
 
-    const uploadInfoRaw = await redis.get(`upload:${uploadId}`);
-    if (!uploadInfoRaw) {
-      return res.status(400).json({ error: "Invalid upload ID" });
+        const start = chunkIndex * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunk = file.slice(start, end);
+
+        const { url } = await getUploadUrl(uploadId, chunkIndex);
+        const etag = await uploadChunkToS3(chunk, url);
+        await markChunkUploaded(uploadId, chunkIndex, etag);
+
+        const progress = Math.round(((chunkIndex + 1) / totalChunks) * 100);
+        setChunkedUploadState(prev => ({
+          ...prev,
+          currentChunk: chunkIndex + 1,
+          progress
+        }));
+      }
+
+      if (uploadStateRef.current.isUploading) {
+        await completeChunkedUpload(uploadId, file.name);
+        setChunkedUploadState({
+          uploadId: null,
+          currentChunk: 0,
+          totalChunks: 0,
+          progress: 0,
+          isPaused: false,
+          isUploading: false,
+        });
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Chunked upload failed:', error);
+      toast.error('Upload failed');
+      return false;
+    } finally {
+      setChunkedUploadState(prev => ({ ...prev, isUploading: false }));
     }
+  }, [initiateChunkedUpload, getUploadUrl, uploadChunkToS3, markChunkUploaded, completeChunkedUpload]);
 
-    const uploadInfo = JSON.parse(uploadInfoRaw);
-    const partNumber = parseInt(chunkIndex, 10) + 1;
+  const pauseChunkedUpload = useCallback(() => {
+    setChunkedUploadState(prev => ({ ...prev, isPaused: true }));
+  }, []);
 
-    const url = await s3.getSignedUrlPromise("uploadPart", {
-      Bucket: process.env.AWS_BUCKET_NAME,
-      Key: uploadInfo.key,
-      PartNumber: partNumber,
-      UploadId: uploadId,
-      Expires: 3600,
+  const resumeChunkedUpload = useCallback(() => {
+    setChunkedUploadState(prev => ({ ...prev, isPaused: false }));
+  }, []);
+
+  const cancelUpload = useCallback(async () => {
+    setChunkedUploadState(prev => ({ ...prev, isUploading: false }));
+    if (uploadStateRef.current.uploadId) {
+      await cancelChunkedUpload(uploadStateRef.current.uploadId);
+    }
+    setChunkedUploadState({
+      uploadId: null,
+      currentChunk: 0,
+      totalChunks: 0,
+      progress: 0,
+      isPaused: false,
+      isUploading: false,
     });
+  }, [cancelChunkedUpload]);
 
-    res.json({ url, partNumber });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to get upload URL: " + error.message });
-  }
-});
-
-// 3. Mark chunk as uploaded (client sends ETag after S3 upload)
-router.post("/mark-chunk-uploaded", async (req, res) => {
-  try {
-    const { uploadId, chunkIndex, etag } = req.body;
-
-    const uploadInfoRaw = await redis.get(`upload:${uploadId}`);
-    if (!uploadInfoRaw) {
-      return res.status(400).json({ error: "Invalid upload ID" });
-    }
-
-    const uploadInfo = JSON.parse(uploadInfoRaw);
-    const partNumber = parseInt(chunkIndex, 10) + 1;
-
-    uploadInfo.parts[chunkIndex] = {
-      ETag: etag,
-      PartNumber: partNumber,
-    };
-    uploadInfo.uploadedChunks.push(chunkIndex);
-
-    await redis.set(
-      `upload:${uploadId}`,
-      JSON.stringify(uploadInfo),
-      "EX",
-      60 * 60
-    );
-
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to mark chunk uploaded: " + error.message });
-  }
-});
-
-// 4. Complete multipart upload
-router.post("/complete-upload", async (req, res) => {
-  try {
-    const { uploadId, fileName } = req.body;
-
-    const uploadInfoRaw = await redis.get(`upload:${uploadId}`);
-    if (!uploadInfoRaw) {
-      return res.status(400).json({ error: "Invalid upload ID" });
-    }
-    const uploadInfo = JSON.parse(uploadInfoRaw);
-
-    const parts = uploadInfo.parts
-      .filter(Boolean)
-      .sort((a, b) => a.PartNumber - b.PartNumber);
-
-    const params = {
-      Bucket: process.env.AWS_BUCKET_NAME,
-      Key: uploadInfo.key,
-      UploadId: uploadId,
-      MultipartUpload: { Parts: parts },
-    };
-
-    const result = await s3.completeMultipartUpload(params).promise();
-
-    const user = await userModel.findById(uploadInfo.userId);
-    if (!user) throw new Error("User not found");
-
-    const newFile = await fileModel.create({
-      userId: uploadInfo.userId,
-      name: fileName,
-      email: user.email,
-      size: uploadInfo.fileSize,
-      starred: false,
-      key: uploadInfo.key,
-      url: result.Location,
-      type: "application/octet-stream",
-    });
-
-    user.files.push(newFile._id);
-    await user.save();
-
-    await redis.del(`upload:${uploadId}`);
-
-    res.json({
-      message: "File uploaded successfully",
-      file: {
-        id: newFile._id,
-        name: newFile.name,
-        size: newFile.size,
-        url: newFile.url,
-        type: newFile.type,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to complete upload: " + error.message });
-  }
-});
-
-// 5. Cancel upload
-router.post("/cancel-upload", async (req, res) => {
-  try {
-    const { uploadId } = req.body;
-    const uploadInfoRaw = await redis.get(`upload:${uploadId}`);
-    if (uploadInfoRaw) {
-      const uploadInfo = JSON.parse(uploadInfoRaw);
-
-      const params = {
-        Bucket: process.env.AWS_BUCKET_NAME,
-        Key: uploadInfo.key,
-        UploadId: uploadId,
-      };
-
-      await s3.abortMultipartUpload(params).promise();
-      await redis.del(`upload:${uploadId}`);
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to cancel upload: " + error.message });
-  }
-});
-
-export default router;
+  return {
+    starFile,
+    trashFile,
+    deleteFile,
+    restoreFile,
+    shareFile,
+    removeSharedFile,
+    uploadFile, // legacy small file upload
+    uploadFileChunked, // multipart S3 upload
+    refreshFiles,
+    pauseChunkedUpload,
+    resumeChunkedUpload,
+    cancelUpload,
+    chunkedUploadState,
+  };
+};
