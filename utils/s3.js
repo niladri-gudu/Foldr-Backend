@@ -16,13 +16,16 @@ export const s3 = new S3Client({
   },
 });
 
-export const generateSignedUrl = async (key) => {
+export const generateSignedUrl = async (key, filename, inline = false) => {
   const command = new GetObjectCommand({
     Bucket: process.env.AWS_BUCKET_NAME,
     Key: key,
+    ...(inline
+      ? { ResponseContentDisposition: `inline; filename="${filename}"` }
+      : { ResponseContentDisposition: `attachment; filename="${filename}"` }),
   });
 
-  const signedUrl = await getSignedUrl(s3, command, { expiresIn: 60 }); // expires in 60 seconds
+  const signedUrl = await getSignedUrl(s3, command, { expiresIn: 60 });
   return signedUrl;
 };
 
