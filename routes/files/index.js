@@ -1,5 +1,5 @@
 import express from "express";
-import uploadRoute from "./uploadRoute.js";
+// import uploadRoute from "./uploadRoute.js";
 import chunkedUploadRoute from "./chunkedUploadRoute.js";
 import starredRoute from "./starredRoute.js";
 import trashRoute from "./trashRoute.js";
@@ -18,7 +18,7 @@ router.use((req, res, next) => {
 });
 
 router.use('/view', viewRoute);
-router.use('/upload', uploadRoute);
+// router.use('/upload', uploadRoute);
 
 // Mount chunked upload routes directly on the router
 router.use('/', chunkedUploadRoute);
