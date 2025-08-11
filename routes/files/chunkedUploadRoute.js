@@ -7,23 +7,21 @@ import { redis } from "../../lib/redis.js";
 
 const router = express.Router();
 
-// Use memory storage instead of writing to disk
-const upload = multer({ storage: multer.memoryStorage() });
-
 console.log('✅ Chunked upload route loaded');
 
 // Configure AWS S3
 const s3 = new AWS.S3({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION
+  region: process.env.AWS_REGION,
+  signatureVersion: "v4",
 });
 
 // 1. Initiate multipart upload
 router.post('/initiate-upload', async (req, res) => {
   try {
     const { userId } = req.user;
-    const { fileName, fileSize, totalChunks } = req.body;
+    const { fileName, fileSize, totalChunks, contentType } = req.body;
 
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized" });
@@ -38,7 +36,6 @@ router.post('/initiate-upload', async (req, res) => {
 
     const multipartUpload = await s3.createMultipartUpload(params).promise();
 
-    // Save upload state to Redis
     await redis.set(
       `upload:${multipartUpload.UploadId}`,
       JSON.stringify({
@@ -54,72 +51,79 @@ router.post('/initiate-upload', async (req, res) => {
       60 * 60
     );
 
-    res.json({ uploadId: multipartUpload.UploadId });
+    res.json({ uploadId: multipartUpload.UploadId, key });
   } catch (error) {
     res.status(500).json({ error: 'Failed to initiate upload: ' + error.message });
   }
 });
 
-// 2. Upload individual chunk (now from memory)
-router.post('/upload-chunk', upload.single('chunk'), async (req, res) => {
+// 2. Get presigned URL for a chunk
+router.post("/get-upload-url", async (req, res) => {
   try {
     const { uploadId, chunkIndex } = req.body;
-    const chunkFile = req.file;
-
-    if (!chunkFile || !chunkFile.buffer) {
-      return res.status(400).json({ error: 'Chunk file missing' });
-    }
 
     const uploadInfoRaw = await redis.get(`upload:${uploadId}`);
     if (!uploadInfoRaw) {
-      return res.status(400).json({ error: 'Invalid upload ID' });
+      return res.status(400).json({ error: "Invalid upload ID" });
     }
 
     const uploadInfo = JSON.parse(uploadInfoRaw);
-    const chunkNum = parseInt(chunkIndex, 10) + 1;
+    const partNumber = parseInt(chunkIndex, 10) + 1;
 
-    const params = {
+    const url = await s3.getSignedUrlPromise("uploadPart", {
       Bucket: process.env.AWS_BUCKET_NAME,
       Key: uploadInfo.key,
-      PartNumber: chunkNum,
+      PartNumber: partNumber,
       UploadId: uploadId,
-      Body: chunkFile.buffer
-    };
-
-    const result = await s3.uploadPart(params).promise();
-
-    uploadInfo.parts[parseInt(chunkIndex, 10)] = {
-      ETag: result.ETag,
-      PartNumber: chunkNum
-    };
-    uploadInfo.uploadedChunks.push(parseInt(chunkIndex, 10));
-
-    // Save back to Redis
-    await redis.set(
-      `upload:${uploadId}`,
-      JSON.stringify(uploadInfo),
-      'EX',
-      60 * 60
-    );
-
-    res.json({ 
-      success: true, 
-      chunkIndex: parseInt(chunkIndex, 10),
-      etag: result.ETag 
+      Expires: 3600,
     });
+
+    res.json({ url, partNumber });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to upload chunk: ' + error.message });
+    res.status(500).json({ error: "Failed to get upload URL: " + error.message });
   }
 });
 
-// 3. Complete multipart upload
-router.post('/complete-upload', async (req, res) => {
+// 3. Mark chunk as uploaded (client sends ETag after S3 upload)
+router.post("/mark-chunk-uploaded", async (req, res) => {
+  try {
+    const { uploadId, chunkIndex, etag } = req.body;
+
+    const uploadInfoRaw = await redis.get(`upload:${uploadId}`);
+    if (!uploadInfoRaw) {
+      return res.status(400).json({ error: "Invalid upload ID" });
+    }
+
+    const uploadInfo = JSON.parse(uploadInfoRaw);
+    const partNumber = parseInt(chunkIndex, 10) + 1;
+
+    uploadInfo.parts[chunkIndex] = {
+      ETag: etag,
+      PartNumber: partNumber,
+    };
+    uploadInfo.uploadedChunks.push(chunkIndex);
+
+    await redis.set(
+      `upload:${uploadId}`,
+      JSON.stringify(uploadInfo),
+      "EX",
+      60 * 60
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to mark chunk uploaded: " + error.message });
+  }
+});
+
+// 4. Complete multipart upload
+router.post("/complete-upload", async (req, res) => {
   try {
     const { uploadId, fileName } = req.body;
 
     const uploadInfoRaw = await redis.get(`upload:${uploadId}`);
     if (!uploadInfoRaw) {
-      return res.status(400).json({ error: 'Invalid upload ID' });
+      return res.status(400).json({ error: "Invalid upload ID" });
     }
     const uploadInfo = JSON.parse(uploadInfoRaw);
 
@@ -131,13 +135,13 @@ router.post('/complete-upload', async (req, res) => {
       Bucket: process.env.AWS_BUCKET_NAME,
       Key: uploadInfo.key,
       UploadId: uploadId,
-      MultipartUpload: { Parts: parts }
+      MultipartUpload: { Parts: parts },
     };
 
     const result = await s3.completeMultipartUpload(params).promise();
 
     const user = await userModel.findById(uploadInfo.userId);
-    if (!user) throw new Error('User not found');
+    if (!user) throw new Error("User not found");
 
     const newFile = await fileModel.create({
       userId: uploadInfo.userId,
@@ -147,13 +151,12 @@ router.post('/complete-upload', async (req, res) => {
       starred: false,
       key: uploadInfo.key,
       url: result.Location,
-      type: 'application/octet-stream',
+      type: "application/octet-stream",
     });
 
     user.files.push(newFile._id);
     await user.save();
 
-    // Remove from Redis
     await redis.del(`upload:${uploadId}`);
 
     res.json({
@@ -167,12 +170,12 @@ router.post('/complete-upload', async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to complete upload: ' + error.message });
+    res.status(500).json({ error: "Failed to complete upload: " + error.message });
   }
 });
 
-// 4. Cancel upload
-router.post('/cancel-upload', async (req, res) => {
+// 5. Cancel upload
+router.post("/cancel-upload", async (req, res) => {
   try {
     const { uploadId } = req.body;
     const uploadInfoRaw = await redis.get(`upload:${uploadId}`);
@@ -182,7 +185,7 @@ router.post('/cancel-upload', async (req, res) => {
       const params = {
         Bucket: process.env.AWS_BUCKET_NAME,
         Key: uploadInfo.key,
-        UploadId: uploadId
+        UploadId: uploadId,
       };
 
       await s3.abortMultipartUpload(params).promise();
@@ -191,7 +194,7 @@ router.post('/cancel-upload', async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to cancel upload: ' + error.message });
+    res.status(500).json({ error: "Failed to cancel upload: " + error.message });
   }
 });
 
