@@ -42,7 +42,7 @@ app.get('/', (req, res) => {
 })
 
 app.use('/auth', authRouter)
-app.use('/file', auth, fileRouter)
+app.use('/api/file', auth, fileRouter)
 
 const startServer = async () => {
   try {
